@@ -18,9 +18,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Shared Sync Setup (Required for Cross-Device Updates)
+## Shared Sync Setup
 
-To make edits from your agent show up on your phone, configure Upstash Redis in Vercel and locally:
+The app supports two storage modes:
+
+- `Redis mode` (recommended for cloud deploy): Upstash Redis
+- `Local file mode` (for Mac-as-server): files under `/.data/trips`
+
+To use Redis mode, configure Upstash Redis in Vercel and locally:
 
 1. Create an Upstash Redis database (or add Redis integration in Vercel).
 2. Set environment variables:
@@ -28,7 +33,8 @@ To make edits from your agent show up on your phone, configure Upstash Redis in 
    - `UPSTASH_REDIS_REST_TOKEN`
 3. In the app, use the same `Trip ID` on both devices.
 
-Without these env vars, the app falls back to local-only mode.
+Without these env vars, the API automatically uses local file mode (`/.data/trips/*.json`).
+This is ideal when you run the app on your Mac and connect from iPhone via Meshnet.
 
 ## API
 
