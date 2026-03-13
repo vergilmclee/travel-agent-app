@@ -54,6 +54,11 @@ const TO_USD_RATE: Record<Currency, number> = {
   GBP: 1.27,
 };
 
+const inputClass =
+  "w-full rounded-xl border border-[#cdd7e2] bg-white/80 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#0b5a7d] focus:ring-2 focus:ring-[#8ad6f7]";
+const buttonClass =
+  "rounded-xl bg-[#0b5a7d] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#084763]";
+
 function id(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -90,30 +95,24 @@ function placeMapLinks(place: Place): { google: string; amap: string } {
   return { google, amap };
 }
 
+function defaultData(): TravelData {
+  return {
+    places: [],
+    budgetItems: [],
+    members: ["Alex", "Jamie", "Sam"],
+    expenses: [],
+    itinerary: [],
+    baseCurrency: "USD",
+  };
+}
+
 function loadInitialData(): TravelData {
-  if (typeof window === "undefined") {
-    return {
-      places: [],
-      budgetItems: [],
-      members: ["Alex", "Jamie", "Sam"],
-      expenses: [],
-      itinerary: [],
-      baseCurrency: "USD",
-    };
-  }
+  if (typeof window === "undefined") return defaultData();
 
   try {
     const raw = localStorage.getItem("travel_agent_data_v1");
-    if (!raw) {
-      return {
-        places: [],
-        budgetItems: [],
-        members: ["Alex", "Jamie", "Sam"],
-        expenses: [],
-        itinerary: [],
-        baseCurrency: "USD",
-      };
-    }
+    if (!raw) return defaultData();
+
     const parsed = JSON.parse(raw) as Partial<TravelData>;
     return {
       places: parsed.places ?? [],
@@ -124,15 +123,12 @@ function loadInitialData(): TravelData {
       baseCurrency: parsed.baseCurrency ?? "USD",
     };
   } catch {
-    return {
-      places: [],
-      budgetItems: [],
-      members: ["Alex", "Jamie", "Sam"],
-      expenses: [],
-      itinerary: [],
-      baseCurrency: "USD",
-    };
+    return defaultData();
   }
+}
+
+function cardClass(accent: string): string {
+  return `rounded-2xl border border-white/60 bg-white/75 p-5 shadow-[0_16px_40px_rgba(10,45,72,0.12)] backdrop-blur-sm ${accent}`;
 }
 
 export default function Home() {
@@ -159,8 +155,9 @@ export default function Home() {
 
   const balances = useMemo(() => {
     const ledger = Object.fromEntries(members.map((m) => [m, 0])) as Record<string, number>;
+
     for (const ex of expenses) {
-      if (!ledger[ex.paidBy] || ex.participants.length === 0) continue;
+      if (ledger[ex.paidBy] === undefined || ex.participants.length === 0) continue;
       const share = ex.amount / ex.participants.length;
       ledger[ex.paidBy] += ex.amount;
       for (const p of ex.participants) {
@@ -168,6 +165,7 @@ export default function Home() {
         ledger[p] -= share;
       }
     }
+
     return ledger;
   }, [expenses, members]);
 
@@ -206,7 +204,6 @@ export default function Home() {
     if (!name) return;
 
     setPlaces((prev) => [
-      ...prev,
       {
         id: id("place"),
         name,
@@ -215,6 +212,7 @@ export default function Home() {
         lat: String(form.get("lat") || "").trim(),
         lng: String(form.get("lng") || "").trim(),
       },
+      ...prev,
     ]);
     e.currentTarget.reset();
   }
@@ -227,7 +225,7 @@ export default function Home() {
     const currency = String(form.get("currency") || "USD") as Currency;
     if (!label || amount <= 0) return;
 
-    setBudgetItems((prev) => [...prev, { id: id("budget"), label, amount, currency }]);
+    setBudgetItems((prev) => [{ id: id("budget"), label, amount, currency }, ...prev]);
     e.currentTarget.reset();
   }
 
@@ -248,7 +246,7 @@ export default function Home() {
     const participants = form.getAll("participants").map(String);
     if (!title || amount <= 0 || !paidBy || participants.length === 0) return;
 
-    setExpenses((prev) => [...prev, { id: id("expense"), title, amount, paidBy, participants }]);
+    setExpenses((prev) => [{ id: id("expense"), title, amount, paidBy, participants }, ...prev]);
     e.currentTarget.reset();
   }
 
@@ -261,48 +259,90 @@ export default function Home() {
     const note = String(form.get("note") || "").trim();
     if (!day || !activity) return;
 
-    setItinerary((prev) => [...prev, { id: id("itinerary"), day, time, activity, note }]);
+    setItinerary((prev) => [{ id: id("itinerary"), day, time, activity, note }, ...prev]);
     e.currentTarget.reset();
   }
 
+  const sortedItinerary = [...itinerary].sort((a, b) => `${a.day}${a.time}`.localeCompare(`${b.day}${b.time}`));
+
   return (
-    <main className="min-h-screen bg-slate-100 p-4 text-slate-900 md:p-8">
-      <div className="mx-auto max-w-5xl space-y-4">
-        <section className="rounded-2xl bg-white p-5 shadow-sm">
-          <h1 className="text-2xl font-bold">Travel Agent App</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Mobile-friendly planner for saved places, map sync, budgeting, currency conversion,
-            group split, and itinerary.
-          </p>
+    <main className="relative min-h-screen overflow-hidden bg-[linear-gradient(180deg,#f3fbff_0%,#e6edf7_48%,#f3f6fb_100%)] px-4 py-6 text-slate-900 md:px-8 md:py-8">
+      <div className="pointer-events-none absolute -left-28 top-24 h-72 w-72 rounded-full bg-[#8fd9ff]/40 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 top-14 h-80 w-80 rounded-full bg-[#9ee9b7]/30 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-4 left-1/3 h-56 w-56 rounded-full bg-[#ffd69c]/30 blur-3xl" />
+
+      <div className="relative mx-auto max-w-6xl space-y-5">
+        <section className="rounded-3xl border border-white/70 bg-[#083a54] px-5 py-6 text-white shadow-[0_20px_55px_rgba(3,18,30,0.4)] md:px-7 md:py-7">
+          <div className="grid gap-4 md:grid-cols-[1.6fr_1fr] md:items-end">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Travel Operations</p>
+              <h1 className="mt-2 text-3xl font-semibold leading-tight md:text-4xl">Trip Agent Workspace</h1>
+              <p className="mt-3 max-w-xl text-sm text-slate-100/90">
+                Manage places, budgeting, shared expenses, and itinerary in one phone-friendly dashboard.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-2xl bg-white/10 p-3">
+                <p className="text-cyan-100">Places</p>
+                <p className="mt-1 text-2xl font-semibold">{places.length}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 p-3">
+                <p className="text-cyan-100">Members</p>
+                <p className="mt-1 text-2xl font-semibold">{members.length}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 p-3">
+                <p className="text-cyan-100">Budget</p>
+                <p className="mt-1 text-lg font-semibold">{asMoney(totalBudgetBase, baseCurrency)}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 p-3">
+                <p className="text-cyan-100">Itinerary</p>
+                <p className="mt-1 text-2xl font-semibold">{itinerary.length}</p>
+              </div>
+            </div>
+          </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          <article className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Saved Places + Map Sync</h2>
-            <form className="mt-3 grid gap-2" onSubmit={addPlace}>
-              <input name="name" placeholder="Place name" className="rounded-lg border p-2" required />
-              <input name="address" placeholder="Address" className="rounded-lg border p-2" />
+        <section className="grid gap-4 xl:grid-cols-2">
+          <article className={cardClass("border-t-4 border-t-[#3f90b8]")}>
+            <h2 className="text-xl font-semibold">Saved Places + Map Sync</h2>
+            <p className="mt-1 text-sm text-slate-600">Store locations and open directly in Google Maps or Amap.</p>
+
+            <form className="mt-4 grid gap-2" onSubmit={addPlace}>
+              <input name="name" placeholder="Place name" className={inputClass} required />
+              <input name="address" placeholder="Address" className={inputClass} />
               <div className="grid grid-cols-2 gap-2">
-                <input name="lat" placeholder="Latitude" className="rounded-lg border p-2" />
-                <input name="lng" placeholder="Longitude" className="rounded-lg border p-2" />
+                <input name="lat" placeholder="Latitude" className={inputClass} />
+                <input name="lng" placeholder="Longitude" className={inputClass} />
               </div>
-              <input name="note" placeholder="Note" className="rounded-lg border p-2" />
-              <button className="rounded-lg bg-slate-900 p-2 text-white">Save place</button>
+              <input name="note" placeholder="Note" className={inputClass} />
+              <button className={buttonClass}>Save place</button>
             </form>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-2">
+              {places.length === 0 ? <p className="text-sm text-slate-500">No places added yet.</p> : null}
               {places.map((place) => {
                 const links = placeMapLinks(place);
                 return (
-                  <div key={place.id} className="rounded-xl border p-3">
+                  <div key={place.id} className="rounded-xl border border-[#d6e1ec] bg-white p-3">
                     <p className="font-medium">{place.name}</p>
+                    {place.address ? <p className="text-sm text-slate-600">{place.address}</p> : null}
                     {place.note ? <p className="text-sm text-slate-600">{place.note}</p> : null}
-                    <div className="mt-2 flex gap-3 text-sm">
-                      <a className="text-blue-600 underline" href={links.google} target="_blank" rel="noreferrer">
-                        Open in Google Maps
+                    <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                      <a
+                        className="rounded-lg bg-[#d8eff9] px-3 py-1 font-medium text-[#0f4a66]"
+                        href={links.google}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Google Maps
                       </a>
-                      <a className="text-emerald-700 underline" href={links.amap} target="_blank" rel="noreferrer">
-                        Open in Amap
+                      <a
+                        className="rounded-lg bg-[#d7f6df] px-3 py-1 font-medium text-[#14532d]"
+                        href={links.amap}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Amap
                       </a>
                     </div>
                   </div>
@@ -311,14 +351,16 @@ export default function Home() {
             </div>
           </article>
 
-          <article className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Budget + Currency</h2>
-            <div className="mt-3 flex items-center gap-2 text-sm">
-              <span>Base currency:</span>
+          <article className={cardClass("border-t-4 border-t-[#ca8c27]")}>
+            <h2 className="text-xl font-semibold">Budget + Currency</h2>
+            <p className="mt-1 text-sm text-slate-600">Track expenses across currencies with one base total.</p>
+
+            <div className="mt-4 flex items-center gap-2 text-sm">
+              <span className="font-medium text-slate-700">Base currency:</span>
               <select
                 value={baseCurrency}
                 onChange={(e) => setBaseCurrency(e.target.value as Currency)}
-                className="rounded border p-1"
+                className={`${inputClass} max-w-[110px]`}
               >
                 {CURRENCIES.map((c) => (
                   <option key={c} value={c}>
@@ -329,10 +371,17 @@ export default function Home() {
             </div>
 
             <form className="mt-3 grid gap-2" onSubmit={addBudget}>
-              <input name="label" placeholder="Item (hotel, food...)" className="rounded-lg border p-2" required />
+              <input name="label" placeholder="Item (hotel, food...)" className={inputClass} required />
               <div className="grid grid-cols-2 gap-2">
-                <input name="amount" type="number" step="0.01" placeholder="Amount" className="rounded-lg border p-2" required />
-                <select name="currency" className="rounded-lg border p-2">
+                <input
+                  name="amount"
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  className={inputClass}
+                  required
+                />
+                <select name="currency" className={inputClass}>
                   {CURRENCIES.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -340,38 +389,38 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <button className="rounded-lg bg-slate-900 p-2 text-white">Add budget item</button>
+              <button className={buttonClass}>Add budget item</button>
             </form>
 
-            <p className="mt-4 text-sm font-medium">Total: {asMoney(totalBudgetBase, baseCurrency)}</p>
-            <ul className="mt-2 space-y-2 text-sm">
+            <p className="mt-4 text-lg font-semibold text-[#7a4d06]">Total: {asMoney(totalBudgetBase, baseCurrency)}</p>
+            <ul className="mt-3 space-y-2 text-sm">
+              {budgetItems.length === 0 ? <li className="text-slate-500">No budget entries yet.</li> : null}
               {budgetItems.map((item) => (
-                <li key={item.id} className="rounded-lg border p-2">
-                  {item.label}: {asMoney(item.amount, item.currency)} (~
-                  {asMoney(convert(item.amount, item.currency, baseCurrency), baseCurrency)})
+                <li key={item.id} className="rounded-xl border border-[#eadcc8] bg-[#fffaf2] p-3">
+                  <p className="font-medium">{item.label}</p>
+                  <p>
+                    {asMoney(item.amount, item.currency)} around {asMoney(convert(item.amount, item.currency, baseCurrency), baseCurrency)}
+                  </p>
                 </li>
               ))}
             </ul>
           </article>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          <article className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Group Expense Split</h2>
-            <form className="mt-3 flex gap-2" onSubmit={addMember}>
-              <input
-                value={newMember}
-                onChange={(e) => setNewMember(e.target.value)}
-                placeholder="Add member"
-                className="flex-1 rounded-lg border p-2"
-              />
-              <button className="rounded-lg bg-slate-900 px-3 text-white">Add</button>
+        <section className="grid gap-4 xl:grid-cols-2">
+          <article className={cardClass("border-t-4 border-t-[#2d8f71]")}>
+            <h2 className="text-xl font-semibold">Group Expense Split</h2>
+            <p className="mt-1 text-sm text-slate-600">Add members and compute who should pay whom.</p>
+
+            <form className="mt-4 flex gap-2" onSubmit={addMember}>
+              <input value={newMember} onChange={(e) => setNewMember(e.target.value)} placeholder="Add member" className={inputClass} />
+              <button className={buttonClass}>Add</button>
             </form>
 
             <form className="mt-3 grid gap-2" onSubmit={addExpense}>
-              <input name="title" placeholder="Expense title" className="rounded-lg border p-2" required />
-              <input name="amount" type="number" step="0.01" placeholder="Amount (USD)" className="rounded-lg border p-2" required />
-              <select name="paidBy" className="rounded-lg border p-2" required>
+              <input name="title" placeholder="Expense title" className={inputClass} required />
+              <input name="amount" type="number" step="0.01" placeholder="Amount (USD)" className={inputClass} required />
+              <select name="paidBy" className={inputClass} required>
                 <option value="">Who paid?</option>
                 {members.map((m) => (
                   <option key={m} value={m}>
@@ -379,8 +428,9 @@ export default function Home() {
                   </option>
                 ))}
               </select>
-              <div className="rounded-lg border p-2">
-                <p className="text-sm font-medium">Participants</p>
+
+              <div className="rounded-xl border border-[#cbe8dd] bg-[#f4fcf8] p-3">
+                <p className="text-sm font-medium text-[#1f5f4a]">Participants</p>
                 <div className="mt-1 grid grid-cols-2 gap-1 text-sm">
                   {members.map((m) => (
                     <label key={m} className="flex items-center gap-2">
@@ -390,19 +440,20 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-              <button className="rounded-lg bg-slate-900 p-2 text-white">Add expense</button>
+
+              <button className={buttonClass}>Add expense</button>
             </form>
 
             <div className="mt-4 space-y-1 text-sm">
               {Object.entries(balances).map(([member, amount]) => (
                 <p key={member}>
-                  {member}: {amount >= 0 ? "gets back" : "owes"} {asMoney(Math.abs(amount), "USD")}
+                  <span className="font-medium">{member}</span>: {amount >= 0 ? "gets back" : "owes"} {asMoney(Math.abs(amount), "USD")}
                 </p>
               ))}
             </div>
 
-            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-              <p className="font-medium">Settlement suggestions</p>
+            <div className="mt-3 rounded-xl border border-[#d0e8dd] bg-[#f7fffa] p-3 text-sm">
+              <p className="font-semibold text-[#1e654f]">Settlement Suggestions</p>
               {settlements.length === 0 ? (
                 <p className="text-slate-600">No transfers needed.</p>
               ) : (
@@ -415,30 +466,31 @@ export default function Home() {
             </div>
           </article>
 
-          <article className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Itinerary Management</h2>
-            <form className="mt-3 grid gap-2" onSubmit={addItinerary}>
+          <article className={cardClass("border-t-4 border-t-[#8c5ee0]")}>
+            <h2 className="text-xl font-semibold">Itinerary Management</h2>
+            <p className="mt-1 text-sm text-slate-600">Build a clear day-by-day plan for the trip.</p>
+
+            <form className="mt-4 grid gap-2" onSubmit={addItinerary}>
               <div className="grid grid-cols-2 gap-2">
-                <input name="day" type="date" className="rounded-lg border p-2" required />
-                <input name="time" type="time" className="rounded-lg border p-2" />
+                <input name="day" type="date" className={inputClass} required />
+                <input name="time" type="time" className={inputClass} />
               </div>
-              <input name="activity" placeholder="Activity" className="rounded-lg border p-2" required />
-              <input name="note" placeholder="Note" className="rounded-lg border p-2" />
-              <button className="rounded-lg bg-slate-900 p-2 text-white">Add to itinerary</button>
+              <input name="activity" placeholder="Activity" className={inputClass} required />
+              <input name="note" placeholder="Note" className={inputClass} />
+              <button className={buttonClass}>Add to itinerary</button>
             </form>
 
             <div className="mt-4 space-y-2 text-sm">
-              {[...itinerary]
-                .sort((a, b) => `${a.day}${a.time}`.localeCompare(`${b.day}${b.time}`))
-                .map((item) => (
-                  <div key={item.id} className="rounded-xl border p-3">
-                    <p className="font-medium">
-                      {item.day} {item.time ? `at ${item.time}` : ""}
-                    </p>
-                    <p>{item.activity}</p>
-                    {item.note ? <p className="text-slate-600">{item.note}</p> : null}
-                  </div>
-                ))}
+              {sortedItinerary.length === 0 ? <p className="text-slate-500">No itinerary entries yet.</p> : null}
+              {sortedItinerary.map((item) => (
+                <div key={item.id} className="rounded-xl border border-[#e5dbff] bg-[#faf7ff] p-3">
+                  <p className="font-medium text-[#5d3ea5]">
+                    {item.day} {item.time ? `at ${item.time}` : ""}
+                  </p>
+                  <p>{item.activity}</p>
+                  {item.note ? <p className="text-slate-600">{item.note}</p> : null}
+                </div>
+              ))}
             </div>
           </article>
         </section>
