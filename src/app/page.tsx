@@ -1,50 +1,18 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BudgetItem,
+  CURRENCIES,
+  Currency,
+  Expense,
+  ItineraryItem,
+  Place,
+  TravelData,
+  TravelRecord,
+  defaultData,
+} from "@/lib/travel-data";
 
-type Place = {
-  id: string;
-  name: string;
-  note: string;
-  address: string;
-  lat: string;
-  lng: string;
-};
-
-type BudgetItem = {
-  id: string;
-  label: string;
-  amount: number;
-  currency: Currency;
-};
-
-type Expense = {
-  id: string;
-  title: string;
-  amount: number;
-  paidBy: string;
-  participants: string[];
-};
-
-type ItineraryItem = {
-  id: string;
-  day: string;
-  time: string;
-  activity: string;
-  note: string;
-};
-
-type Currency = "USD" | "EUR" | "HKD" | "JPY" | "CNY" | "GBP";
-type TravelData = {
-  places: Place[];
-  budgetItems: BudgetItem[];
-  members: string[];
-  expenses: Expense[];
-  itinerary: ItineraryItem[];
-  baseCurrency: Currency;
-};
-
-const CURRENCIES: Currency[] = ["USD", "EUR", "HKD", "JPY", "CNY", "GBP"];
 const TO_USD_RATE: Record<Currency, number> = {
   USD: 1,
   EUR: 1.09,
@@ -95,24 +63,11 @@ function placeMapLinks(place: Place): { google: string; amap: string } {
   return { google, amap };
 }
 
-function defaultData(): TravelData {
-  return {
-    places: [],
-    budgetItems: [],
-    members: ["Alex", "Jamie", "Sam"],
-    expenses: [],
-    itinerary: [],
-    baseCurrency: "USD",
-  };
-}
-
-function loadInitialData(): TravelData {
+function loadLocalData(): TravelData {
   if (typeof window === "undefined") return defaultData();
-
   try {
-    const raw = localStorage.getItem("travel_agent_data_v1");
+    const raw = localStorage.getItem("travel_agent_data_v2");
     if (!raw) return defaultData();
-
     const parsed = JSON.parse(raw) as Partial<TravelData>;
     return {
       places: parsed.places ?? [],
@@ -127,12 +82,17 @@ function loadInitialData(): TravelData {
   }
 }
 
+function loadTripId(): string {
+  if (typeof window === "undefined") return "team-trip";
+  return localStorage.getItem("travel_agent_trip_id") || "team-trip";
+}
+
 function cardClass(accent: string): string {
   return `rounded-2xl border border-white/60 bg-white/75 p-5 shadow-[0_16px_40px_rgba(10,45,72,0.12)] backdrop-blur-sm ${accent}`;
 }
 
 export default function Home() {
-  const [initialData] = useState<TravelData>(() => loadInitialData());
+  const [initialData] = useState<TravelData>(() => loadLocalData());
   const [places, setPlaces] = useState<Place[]>(initialData.places);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>(initialData.budgetItems);
   const [members, setMembers] = useState<string[]>(initialData.members);
@@ -140,13 +100,16 @@ export default function Home() {
   const [itinerary, setItinerary] = useState<ItineraryItem[]>(initialData.itinerary);
   const [baseCurrency, setBaseCurrency] = useState<Currency>(initialData.baseCurrency);
   const [newMember, setNewMember] = useState("");
+  const [tripId, setTripId] = useState<string>(() => loadTripId());
+  const [syncState, setSyncState] = useState<string>("Initializing sync...");
+  const [syncReady, setSyncReady] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem(
-      "travel_agent_data_v1",
-      JSON.stringify({ places, budgetItems, members, expenses, itinerary, baseCurrency }),
-    );
-  }, [places, budgetItems, members, expenses, itinerary, baseCurrency]);
+  const currentData = useMemo(
+    () => ({ places, budgetItems, members, expenses, itinerary, baseCurrency }),
+    [places, budgetItems, members, expenses, itinerary, baseCurrency],
+  );
+  const latestDataRef = useRef<TravelData>(currentData);
 
   const totalBudgetBase = useMemo(
     () => budgetItems.reduce((sum, item) => sum + convert(item.amount, item.currency, baseCurrency), 0),
@@ -196,6 +159,137 @@ export default function Home() {
 
     return result;
   }, [balances]);
+
+  function applyTravelData(data: TravelData) {
+    setPlaces(data.places);
+    setBudgetItems(data.budgetItems);
+    setMembers(data.members.length ? data.members : ["Alex", "Jamie", "Sam"]);
+    setExpenses(data.expenses);
+    setItinerary(data.itinerary);
+    setBaseCurrency(data.baseCurrency);
+  }
+
+  async function fetchRemoteRecord(activeTripId: string): Promise<TravelRecord | null> {
+    const res = await fetch(`/api/travel-data?tripId=${encodeURIComponent(activeTripId)}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`Sync GET failed: ${res.status}`);
+    const json = (await res.json()) as { record: TravelRecord | null };
+    return json.record;
+  }
+
+  async function pushRemoteData(activeTripId: string, data: TravelData): Promise<TravelRecord> {
+    const res = await fetch(`/api/travel-data?tripId=${encodeURIComponent(activeTripId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Sync PUT failed: ${res.status}`);
+    const json = (await res.json()) as { record: TravelRecord };
+    return json.record;
+  }
+
+  async function syncNow() {
+    setSyncState("Syncing...");
+    try {
+      const remote = await fetchRemoteRecord(tripId);
+      if (remote) {
+        applyTravelData(remote);
+        setLastSyncedAt(remote.updatedAt);
+      } else {
+        const saved = await pushRemoteData(tripId, currentData);
+        setLastSyncedAt(saved.updatedAt);
+      }
+      setSyncState("Synced");
+    } catch {
+      setSyncState("Cloud unavailable. Using local data.");
+    }
+  }
+
+  useEffect(() => {
+    localStorage.setItem("travel_agent_data_v2", JSON.stringify(currentData));
+  }, [currentData]);
+
+  useEffect(() => {
+    latestDataRef.current = currentData;
+  }, [currentData]);
+
+  useEffect(() => {
+    localStorage.setItem("travel_agent_trip_id", tripId);
+  }, [tripId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrapRemote() {
+      setSyncReady(false);
+      setSyncState("Loading shared trip...");
+
+      try {
+        const remote = await fetchRemoteRecord(tripId);
+        if (cancelled) return;
+
+        if (remote) {
+          applyTravelData(remote);
+          setLastSyncedAt(remote.updatedAt);
+        } else {
+          const saved = await pushRemoteData(tripId, latestDataRef.current);
+          if (cancelled) return;
+          setLastSyncedAt(saved.updatedAt);
+        }
+
+        setSyncState("Synced");
+      } catch {
+        if (cancelled) return;
+        setSyncState("Cloud unavailable. Using local data.");
+      } finally {
+        if (!cancelled) setSyncReady(true);
+      }
+    }
+
+    bootstrapRemote();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId]);
+
+  useEffect(() => {
+    if (!syncReady) return;
+    const timeout = setTimeout(async () => {
+      try {
+        setSyncState("Saving...");
+        const saved = await pushRemoteData(tripId, currentData);
+        setLastSyncedAt(saved.updatedAt);
+        setSyncState("Synced");
+      } catch {
+        setSyncState("Cloud unavailable. Using local data.");
+      }
+    }, 900);
+
+    return () => clearTimeout(timeout);
+  }, [tripId, currentData, syncReady]);
+
+  useEffect(() => {
+    if (!syncReady) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const remote = await fetchRemoteRecord(tripId);
+        if (!remote) return;
+        if (lastSyncedAt && remote.updatedAt <= lastSyncedAt) return;
+
+        applyTravelData(remote);
+        setLastSyncedAt(remote.updatedAt);
+        setSyncState("Updated from shared cloud data");
+      } catch {
+        // Keep local state silently while poll fails.
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [tripId, syncReady, lastSyncedAt]);
 
   function addPlace(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -273,31 +367,31 @@ export default function Home() {
 
       <div className="relative mx-auto max-w-6xl space-y-5">
         <section className="rounded-3xl border border-white/70 bg-[#083a54] px-5 py-6 text-white shadow-[0_20px_55px_rgba(3,18,30,0.4)] md:px-7 md:py-7">
-          <div className="grid gap-4 md:grid-cols-[1.6fr_1fr] md:items-end">
+          <div className="grid gap-4 md:grid-cols-[1.5fr_1fr] md:items-end">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-cyan-200">Travel Operations</p>
               <h1 className="mt-2 text-3xl font-semibold leading-tight md:text-4xl">Trip Agent Workspace</h1>
               <p className="mt-3 max-w-xl text-sm text-slate-100/90">
-                Manage places, budgeting, shared expenses, and itinerary in one phone-friendly dashboard.
+                Use the same Trip ID on your phone and your agent side. Changes sync across devices.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-2xl bg-white/10 p-3">
-                <p className="text-cyan-100">Places</p>
-                <p className="mt-1 text-2xl font-semibold">{places.length}</p>
+            <div className="grid gap-2 rounded-2xl bg-white/10 p-3 text-sm">
+              <label className="font-semibold text-cyan-100">Trip ID</label>
+              <input
+                value={tripId}
+                onChange={(e) => setTripId(e.target.value.trim() || "team-trip")}
+                className="rounded-lg border border-white/40 bg-white/20 px-3 py-2 text-white placeholder:text-cyan-100/80"
+                placeholder="team-trip"
+              />
+              <div className="flex items-center gap-2">
+                <button className="rounded-lg bg-cyan-100 px-3 py-1 font-semibold text-[#083a54]" onClick={syncNow}>
+                  Sync now
+                </button>
+                <span className="text-xs text-cyan-100">{syncState}</span>
               </div>
-              <div className="rounded-2xl bg-white/10 p-3">
-                <p className="text-cyan-100">Members</p>
-                <p className="mt-1 text-2xl font-semibold">{members.length}</p>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-3">
-                <p className="text-cyan-100">Budget</p>
-                <p className="mt-1 text-lg font-semibold">{asMoney(totalBudgetBase, baseCurrency)}</p>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-3">
-                <p className="text-cyan-100">Itinerary</p>
-                <p className="mt-1 text-2xl font-semibold">{itinerary.length}</p>
-              </div>
+              <span className="text-xs text-cyan-100/90">
+                {lastSyncedAt ? `Last sync: ${new Date(lastSyncedAt).toLocaleTimeString()}` : "Not synced yet"}
+              </span>
             </div>
           </div>
         </section>

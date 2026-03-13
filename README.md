@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Travel Agent App
 
-## Getting Started
+Mobile-first travel planner with:
 
-First, run the development server:
+- Saved places with Google Maps and Amap links
+- Budgeting with currency conversion
+- Group expense split and settlements
+- Itinerary management
+- Shared cloud sync across devices (agent + phone) using `tripId`
+
+## Local Development
+
+Run:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Shared Sync Setup (Required for Cross-Device Updates)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To make edits from your agent show up on your phone, configure Upstash Redis in Vercel and locally:
 
-## Learn More
+1. Create an Upstash Redis database (or add Redis integration in Vercel).
+2. Set environment variables:
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+3. In the app, use the same `Trip ID` on both devices.
 
-To learn more about Next.js, take a look at the following resources:
+Without these env vars, the app falls back to local-only mode.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## API
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `GET /api/travel-data?tripId=<id>`
+- `PUT /api/travel-data?tripId=<id>`
 
-## Deploy on Vercel
+The server stores one shared JSON record per `tripId`, with `updatedAt` for polling updates.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploy
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deploy to Vercel:
+
+```bash
+npx vercel
+npx vercel --prod
+```
